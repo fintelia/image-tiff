@@ -896,49 +896,54 @@ impl<R: Read + Seek> Decoder<R> {
     ) -> TiffResult<usize> {
         let color_type = self.colortype()?;
         self.goto_offset_u64(offset)?;
-        let (bytes, mut reader): (usize, Box<dyn EndianReader>) = match self.compression_method {
+
+        let mut buf = Vec::new();
+        match self.compression_method {
             CompressionMethod::None => {
-                let order = self.reader.byte_order;
-                (
-                    usize::try_from(length)?,
-                    Box::new(SmartReader::wrap(&mut self.reader, order)),
-                )
+                buf.resize(usize::try_from(length)?, 0);
+                self.reader.read_exact(&mut buf)?;
             }
             CompressionMethod::LZW => {
-                let (bytes, reader) = LZWReader::new(
+                let (bytes, mut reader) = LZWReader::new(
                     &mut self.reader,
                     usize::try_from(length)?,
                     strip_sample_count * buffer.byte_len(),
                 )?;
-                (bytes, Box::new(reader))
+                buf.resize(bytes, 0);
+                reader.read_exact(&mut buf)?;
             }
             CompressionMethod::PackBits => {
                 let order = self.reader.byte_order;
-                let (bytes, reader) =
+                let (bytes, mut reader) =
                     PackBitsReader::new(&mut self.reader, order, usize::try_from(length)?)?;
-                (bytes, Box::new(reader))
+                buf.resize(bytes, 0);
+                reader.read_exact(&mut buf)?;
             }
             CompressionMethod::OldDeflate => {
-                let (bytes, reader) = DeflateReader::new(&mut self.reader, strip_sample_count)?;
-                (bytes, Box::new(reader))
+                let (bytes, mut reader) = DeflateReader::new(&mut self.reader, strip_sample_count)?;
+                buf.resize(bytes, 0);
+                reader.read_exact(&mut buf)?;
             }
             method => {
                 return Err(TiffError::UnsupportedError(
                     TiffUnsupportedError::UnsupportedCompressionMethod(method),
                 ))
             }
-        };
+        }
 
         // FIXME: this might be suboptimal. We might default remaining bits to ´0`, which some
         // other decoders might do.
-        if bytes / buffer.byte_len() > strip_sample_count {
+        if buf.len() / buffer.byte_len() > strip_sample_count {
             return Err(TiffError::FormatError(
                 TiffFormatError::UnexpectedCompressedData {
-                    actual_bytes: bytes,
+                    actual_bytes: buf.len(),
                     required_bytes: strip_sample_count * buffer.byte_len(),
                 },
             ));
         }
+
+        let bytes = buf.len();
+        let mut reader = SmartReader::wrap(io::Cursor::new(buf), self.reader.byte_order);
 
         Ok(match (color_type, buffer) {
             (ColorType::RGB(8), DecodingBuffer::U8(ref mut buffer))
