@@ -554,7 +554,7 @@ impl EndianReader for PackBitsReader {
 #[derive(Debug)]
 pub struct SmartReader<R>
 where
-    R: Read + Seek,
+    R: Read,
 {
     reader: R,
     pub byte_order: ByteOrder,
@@ -562,7 +562,7 @@ where
 
 impl<R> SmartReader<R>
 where
-    R: Read + Seek,
+    R: Read,
 {
     /// Wraps a reader
     pub fn wrap(reader: R, byte_order: ByteOrder) -> SmartReader<R> {
@@ -572,7 +572,7 @@ where
 
 impl<R> EndianReader for SmartReader<R>
 where
-    R: Read + Seek,
+    R: Read,
 {
     #[inline(always)]
     fn byte_order(&self) -> ByteOrder {
@@ -580,7 +580,7 @@ where
     }
 }
 
-impl<R: Read + Seek> Read for SmartReader<R> {
+impl<R: Read> Read for SmartReader<R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.reader.read(buf)
