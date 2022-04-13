@@ -630,16 +630,20 @@ impl<R: Read + Seek> Decoder<R> {
     }
 
     #[inline]
+    #[deprecated]
     pub fn read_ifd_offset(&mut self) -> Result<u64, io::Error> {
         if self.bigtiff {
+            #[allow(deprecated)]
             self.read_long8()
         } else {
+            #[allow(deprecated)]
             self.read_long().map(u64::from)
         }
     }
 
     /// Reads a TIFF byte value
     #[inline]
+    #[deprecated]
     pub fn read_byte(&mut self) -> Result<u8, io::Error> {
         let mut buf = [0; 1];
         self.reader.read_exact(&mut buf)?;
@@ -648,52 +652,61 @@ impl<R: Read + Seek> Decoder<R> {
 
     /// Reads a TIFF short value
     #[inline]
+    #[deprecated]
     pub fn read_short(&mut self) -> Result<u16, io::Error> {
         self.reader.read_u16()
     }
 
     /// Reads a TIFF sshort value
     #[inline]
+    #[deprecated]
     pub fn read_sshort(&mut self) -> Result<i16, io::Error> {
         self.reader.read_i16()
     }
 
     /// Reads a TIFF long value
     #[inline]
+    #[deprecated]
     pub fn read_long(&mut self) -> Result<u32, io::Error> {
         self.reader.read_u32()
     }
 
     /// Reads a TIFF slong value
     #[inline]
+    #[deprecated]
     pub fn read_slong(&mut self) -> Result<i32, io::Error> {
         self.reader.read_i32()
     }
 
     /// Reads a TIFF float value
     #[inline]
+    #[deprecated]
     pub fn read_float(&mut self) -> Result<f32, io::Error> {
         self.reader.read_f32()
     }
 
     /// Reads a TIFF double value
     #[inline]
+    #[deprecated]
     pub fn read_double(&mut self) -> Result<f64, io::Error> {
         self.reader.read_f64()
     }
 
     #[inline]
+    #[deprecated]
     pub fn read_long8(&mut self) -> Result<u64, io::Error> {
         self.reader.read_u64()
     }
 
     #[inline]
+    #[deprecated]
     pub fn read_slong8(&mut self) -> Result<i64, io::Error> {
         self.reader.read_i64()
     }
 
     /// Reads a string
     #[inline]
+    #[deprecated]
     pub fn read_string(&mut self, length: usize) -> TiffResult<String> {
         let mut out = vec![0; length];
         self.reader.read_exact(&mut out)?;
@@ -706,6 +719,7 @@ impl<R: Read + Seek> Decoder<R> {
 
     /// Reads a TIFF IFA offset/value field
     #[inline]
+    #[deprecated]
     pub fn read_offset(&mut self) -> TiffResult<[u8; 4]> {
         if self.bigtiff {
             return Err(TiffError::FormatError(
@@ -719,6 +733,7 @@ impl<R: Read + Seek> Decoder<R> {
 
     /// Reads a TIFF IFA offset/value field
     #[inline]
+    #[deprecated]
     pub fn read_offset_u64(&mut self) -> Result<[u8; 8], io::Error> {
         let mut val = [0; 8];
         self.reader.read_exact(&mut val)?;
@@ -727,12 +742,19 @@ impl<R: Read + Seek> Decoder<R> {
 
     /// Moves the cursor to the specified offset
     #[inline]
+    #[deprecated]
     pub fn goto_offset(&mut self, offset: u32) -> io::Result<()> {
-        self.goto_offset_u64(offset.into())
+        self.goto_offset_inner(offset.into())
     }
 
     #[inline]
+    #[deprecated]
     pub fn goto_offset_u64(&mut self, offset: u64) -> io::Result<()> {
+        self.reader.seek(io::SeekFrom::Start(offset)).map(|_| ())
+    }
+
+    #[inline]
+    fn goto_offset_inner(&mut self, offset: u64) -> io::Result<()> {
         self.reader.seek(io::SeekFrom::Start(offset)).map(|_| ())
     }
 
@@ -1028,7 +1050,7 @@ impl<R: Read + Seek> Decoder<R> {
         }
 
         // Construct necessary reader to perform decompression.
-        self.goto_offset_u64(offset)?;
+        self.goto_offset_inner(offset)?;
         let byte_order = self.reader.byte_order;
         let compression_method = self.image().compression_method;
 
@@ -1094,7 +1116,7 @@ impl<R: Read + Seek> Decoder<R> {
         let row_samples = tile_attrs.row_samples();
         let padding_right_samples = padding_right * self.image().bits_per_sample.len();
 
-        self.goto_offset_u64(offset)?;
+        self.goto_offset_inner(offset)?;
 
         let line_samples = output_width * self.image().bits_per_sample.len();
         let compression_method = self.image().compression_method;
@@ -1244,7 +1266,7 @@ impl<R: Read + Seek> Decoder<R> {
             let offset = self.image.chunk_offsets[idx];
             let length = self.image.chunk_bytes[idx];
 
-            self.goto_offset_u64(offset)?;
+            self.goto_offset_inner(offset)?;
 
             if self.image().jpeg_tables.is_some() && length < 2 {
                 return Err(TiffError::FormatError(
