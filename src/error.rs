@@ -6,15 +6,13 @@ use std::str;
 use std::string;
 use std::sync::Arc;
 
-use jpeg::UnsupportedFeature;
-
 use crate::decoder::{ifd::Value, ChunkType};
 use crate::tags::{
     CompressionMethod, PhotometricInterpretation, PlanarConfiguration, SampleFormat, Tag,
 };
 use crate::ColorType;
 
-use crate::weezl::LzwError;
+use weezl::LzwError;
 
 /// Tiff error kinds.
 #[derive(Debug)]
@@ -160,7 +158,6 @@ pub enum TiffUnsupportedError {
     UnsupportedPlanarConfig(Option<PlanarConfiguration>),
     UnsupportedDataType,
     UnsupportedInterpretation(PhotometricInterpretation),
-    UnsupportedJpegFeature(UnsupportedFeature),
 }
 
 impl fmt::Display for TiffUnsupportedError {
@@ -215,9 +212,6 @@ impl fmt::Display for TiffUnsupportedError {
                     "Unsupported photometric interpretation \"{:?}\".",
                     interpretation
                 )
-            }
-            UnsupportedJpegFeature(ref unsupported_feature) => {
-                write!(fmt, "Unsupported JPEG feature {:?}", unsupported_feature)
             }
         }
     }
@@ -340,11 +334,11 @@ impl From<LzwError> for TiffError {
 
 #[derive(Debug, Clone)]
 pub struct JpegDecoderError {
-    inner: Arc<jpeg::Error>,
+    inner: Arc<zune_jpeg::errors::DecodeErrors>,
 }
 
 impl JpegDecoderError {
-    fn new(error: jpeg::Error) -> Self {
+    fn new(error: zune_jpeg::errors::DecodeErrors) -> Self {
         Self {
             inner: Arc::new(error),
         }
@@ -369,8 +363,8 @@ impl From<JpegDecoderError> for TiffError {
     }
 }
 
-impl From<jpeg::Error> for TiffError {
-    fn from(error: jpeg::Error) -> Self {
+impl From<zune_jpeg::errors::DecodeErrors> for TiffError {
+    fn from(error: zune_jpeg::errors::DecodeErrors) -> Self {
         JpegDecoderError::new(error).into()
     }
 }
