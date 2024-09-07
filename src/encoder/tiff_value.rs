@@ -1,8 +1,6 @@
-use std::{borrow::Cow, io::Write, slice::from_ref};
+use std::{borrow::Cow, slice::from_ref};
 
-use crate::{bytecast, tags::Type, TiffError, TiffFormatError, TiffResult};
-
-use super::writer::TiffWriter;
+use crate::{bytecast, tags::Type};
 
 /// Trait for types that can be encoded in a tiff file
 pub trait TiffValue {
@@ -16,14 +14,6 @@ pub trait TiffValue {
     /// Access this value as an contiguous sequence of bytes.
     /// If their is no trivial representation, allocate it on the heap.
     fn data(&self) -> Cow<[u8]>;
-
-    /// Write this value to a TiffWriter.
-    /// While the default implementation will work in all cases, it may require unnecessary allocations.
-    /// The written bytes of any custom implementation MUST be the same as yielded by `self.data()`.
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_bytes(&self.data())?;
-        Ok(())
-    }
 }
 
 impl TiffValue for [u8] {
@@ -166,11 +156,6 @@ impl TiffValue for u8 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u8(*self)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(from_ref(self))
     }
@@ -182,11 +167,6 @@ impl TiffValue for i8 {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_i8(*self)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -202,11 +182,6 @@ impl TiffValue for u16 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u16(*self)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::u16_as_ne_bytes(from_ref(self)))
     }
@@ -218,11 +193,6 @@ impl TiffValue for i16 {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_i16(*self)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -238,11 +208,6 @@ impl TiffValue for u32 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u32(*self)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::u32_as_ne_bytes(from_ref(self)))
     }
@@ -254,11 +219,6 @@ impl TiffValue for i32 {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_i32(*self)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -274,11 +234,6 @@ impl TiffValue for u64 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u64(*self)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::u64_as_ne_bytes(from_ref(self)))
     }
@@ -290,11 +245,6 @@ impl TiffValue for i64 {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_i64(*self)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -310,11 +260,6 @@ impl TiffValue for f32 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_f32(*self)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::f32_as_ne_bytes(from_ref(self)))
     }
@@ -326,11 +271,6 @@ impl TiffValue for f64 {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_f64(*self)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -346,11 +286,6 @@ impl TiffValue for Ifd {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u32(self.0)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::u32_as_ne_bytes(from_ref(&self.0)))
     }
@@ -364,11 +299,6 @@ impl TiffValue for Ifd8 {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u64(self.0)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Borrowed(bytecast::u64_as_ne_bytes(from_ref(&self.0)))
     }
@@ -380,12 +310,6 @@ impl TiffValue for Rational {
 
     fn count(&self) -> usize {
         1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_u32(self.n)?;
-        writer.write_u32(self.d)?;
-        Ok(())
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -405,12 +329,6 @@ impl TiffValue for SRational {
         1
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        writer.write_i32(self.n)?;
-        writer.write_i32(self.d)?;
-        Ok(())
-    }
-
     fn data(&self) -> Cow<[u8]> {
         Cow::Owned({
             let first_dword = bytecast::i32_as_ne_bytes(from_ref(&self.n));
@@ -426,16 +344,6 @@ impl TiffValue for str {
 
     fn count(&self) -> usize {
         self.len() + 1
-    }
-
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        if self.is_ascii() && !self.bytes().any(|b| b == 0) {
-            writer.write_bytes(self.as_bytes())?;
-            writer.write_u8(0)?;
-            Ok(())
-        } else {
-            Err(TiffError::FormatError(TiffFormatError::InvalidTag))
-        }
     }
 
     fn data(&self) -> Cow<[u8]> {
@@ -458,10 +366,6 @@ impl<'a, T: TiffValue + ?Sized> TiffValue for &'a T {
         (*self).count()
     }
 
-    fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-        (*self).write(writer)
-    }
-
     fn data(&self) -> Cow<[u8]> {
         T::data(self)
     }
@@ -475,13 +379,6 @@ macro_rules! impl_tiff_value_for_contiguous_sequence {
 
             fn count(&self) -> usize {
                 self.len()
-            }
-
-            fn write<W: Write>(&self, writer: &mut TiffWriter<W>) -> TiffResult<()> {
-                for x in self {
-                    x.write(writer)?;
-                }
-                Ok(())
             }
 
             fn data(&self) -> Cow<[u8]> {
