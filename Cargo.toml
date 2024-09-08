@@ -22,6 +22,7 @@ jpeg = { package = "jpeg-decoder", version = "0.3.0", default-features = false }
 flate2 = "1.0.20"
 
 [dev-dependencies]
+bytemuck = "1.18.0"
 criterion = "0.3.1"
 
 [[bench]]

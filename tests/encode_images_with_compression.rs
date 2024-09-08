@@ -3,42 +3,34 @@ extern crate tiff;
 use std::io::{Cursor, Seek, Write};
 use tiff::{
     decoder::{Decoder, DecodingResult},
-    encoder::{
-        colortype::{self, ColorType},
-        compression::*,
-        TiffEncoder, TiffValue,
-    },
+    encoder::{Compression, DeflateLevel, TiffEncoder, TiffValue},
+    tags::PhotometricInterpretation,
 };
 
 trait TestImage<const NUM_CHANNELS: usize>: From<Vec<<Self::Color as ColorType>::Inner>> {
     const WIDTH: u32;
     const HEIGHT: u32;
-    type Color: ColorType;
+    const COLOR: PhotometricInterpretation;
+    const BYTES_PER_SAMPLE: u8;
+    const NUM_CHANNELS: usize;
 
-    fn reference_data(&self) -> &[<Self::Color as ColorType>::Inner];
-    fn generate_pixel(x: u32, y: u32) -> [<Self::Color as ColorType>::Inner; NUM_CHANNELS];
+    fn reference_data(&self) -> &[u8];
 
-    fn compress<C: Compression, W: Write + Seek>(
-        &self,
-        encoder: &mut TiffEncoder<W>,
-        compression: C,
-    ) where
-        [<Self::Color as ColorType>::Inner]: TiffValue,
-    {
-        let image = encoder
-            .new_image_with_compression::<Self::Color, C>(Self::WIDTH, Self::HEIGHT, compression)
+    fn compress<W: Write + Seek>(&self, encoder: &mut TiffEncoder<W>, compression: Compression) {
+        encoder.set_compression(compression);
+        encoder.set_bits_per_sample(Self::BYTES_PER_SAMPLE * 8);
+        encoder
+            .write_image(
+                Self::WIDTH,
+                Self::HEIGHT,
+                Self::COLOR,
+                self.reference_data(),
+            )
             .unwrap();
-        image.write_data(self.reference_data()).unwrap();
     }
 
     fn generate() -> Self {
-        assert_eq!(
-            Self::Color::BITS_PER_SAMPLE.len(),
-            NUM_CHANNELS,
-            "Incompatible color type"
-        );
-
-        let mut data = Vec::with_capacity((Self::WIDTH * Self::HEIGHT) as usize * NUM_CHANNELS);
+        let mut data = vec![0; (Self::WIDTH * Self::HEIGHT) as usize * Self::NUM_CHANNELS];
         for x in 0..Self::WIDTH {
             for y in 0..Self::HEIGHT {
                 data.extend(IntoIterator::into_iter(Self::generate_pixel(x, y)));
@@ -59,10 +51,9 @@ impl From<Vec<u16>> for TestImageColor {
 impl TestImage<3> for TestImageColor {
     const WIDTH: u32 = 1;
     const HEIGHT: u32 = 7;
-    type Color = colortype::RGB16;
 
     fn reference_data(&self) -> &[u16] {
-        &self.0
+        bytemuck::cast_slice(&self.0)
     }
 
     fn generate_pixel(x: u32, y: u32) -> [<Self::Color as ColorType>::Inner; 3] {
@@ -94,7 +85,7 @@ impl TestImage<1> for TestImageGrayscale {
     }
 }
 
-fn encode_decode_with_compression<C: Compression + Clone>(compression: C) {
+fn encode_decode_with_compression(compression: Compression) {
     let mut data = Cursor::new(Vec::new());
 
     let image_rgb = TestImageColor::generate();
@@ -103,7 +94,7 @@ fn encode_decode_with_compression<C: Compression + Clone>(compression: C) {
     // Encode tiff with compression
     {
         // Create a multipage image with 2 images
-        let mut encoder = TiffEncoder::new(&mut data).unwrap();
+        let mut encoder = TiffEncoder::new(&mut data);
         image_rgb.compress(&mut encoder, compression.clone());
         image_grayscale.compress(&mut encoder, compression);
     }
@@ -116,7 +107,7 @@ fn encode_decode_with_compression<C: Compression + Clone>(compression: C) {
         // Check the RGB image
         assert_eq!(
             match decoder.read_image() {
-                Ok(DecodingResult::U16(image_data)) => image_data,
+                Ok(DecodingResult::U16(image_data)) => bytemuck::cast_slice(&image_data),
                 unexpected => panic!("Descoding RGB failed: {:?}", unexpected),
             },
             image_rgb.reference_data()
@@ -136,22 +127,22 @@ fn encode_decode_with_compression<C: Compression + Clone>(compression: C) {
 
 #[test]
 fn encode_decode_without_compression() {
-    encode_decode_with_compression(Uncompressed::default());
+    encode_decode_with_compression(Compression::None);
 }
 
 #[test]
 fn encode_decode_with_lzw() {
-    encode_decode_with_compression(Lzw::default());
+    encode_decode_with_compression(Compression::Lzw);
 }
 
 #[test]
 fn encode_decode_with_deflate() {
-    encode_decode_with_compression(Deflate::with_level(DeflateLevel::Fast));
-    encode_decode_with_compression(Deflate::with_level(DeflateLevel::Balanced));
-    encode_decode_with_compression(Deflate::with_level(DeflateLevel::Best));
+    encode_decode_with_compression(Compression::Deflate(DeflateLevel::Fast));
+    encode_decode_with_compression(Compression::Deflate(DeflateLevel::Balanced));
+    encode_decode_with_compression(Compression::Deflate(DeflateLevel::Best));
 }
 
 #[test]
 fn encode_decode_with_packbits() {
-    encode_decode_with_compression(Packbits::default());
+    encode_decode_with_compression(Compression::PackBits);
 }

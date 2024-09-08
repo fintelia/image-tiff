@@ -1,4 +1,4 @@
-pub use tiff_value::*;
+
 
 use std::{
     collections::BTreeMap,
@@ -12,15 +12,26 @@ use crate::{
 };
 
 mod compression;
-mod tiff_value;
+pub mod value;
 
-use self::compression::*;
+use compression::*;
+use value::*;
 
 struct DirectoryEntry {
     data_type: u16,
     count: u64,
     data: Vec<u8>,
 }
+
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compression {
+    None,
+    PackBits,
+    Lzw,
+    Deflate(DeflateLevel),
+}
+pub use compression::DeflateLevel;
 
 /// Encoder for Tiff and BigTiff files.
 ///
@@ -49,7 +60,7 @@ pub struct TiffEncoder<W: Write + Seek> {
     ifd_pointer_pos: Option<u64>,
     // We use BTreeMap to make sure tags are written in correct order
     ifd: BTreeMap<u16, DirectoryEntry>,
-    compression: CompressionMethod,
+    compression: Compression,
     rows_per_strip: Option<u32>,
     sample_format: SampleFormat,
     bits_per_sample: u8,
@@ -67,7 +78,7 @@ impl<W: Write + Seek> TiffEncoder<W> {
             big_tiff: false,
             ifd_pointer_pos: None,
             ifd: BTreeMap::new(),
-            compression: CompressionMethod::None,
+            compression: Compression::None,
             rows_per_strip: None,
             sample_format: SampleFormat::Uint,
             bits_per_sample: 8,
@@ -84,7 +95,7 @@ impl<W: Write + Seek> TiffEncoder<W> {
             big_tiff: true,
             ifd_pointer_pos: None,
             ifd: BTreeMap::new(),
-            compression: CompressionMethod::None,
+            compression: Compression::None,
             rows_per_strip: None,
             sample_format: SampleFormat::Uint,
             bits_per_sample: 8,
@@ -92,7 +103,7 @@ impl<W: Write + Seek> TiffEncoder<W> {
         }
     }
 
-    pub fn set_compression(&mut self, compression: CompressionMethod) {
+    pub fn set_compression(&mut self, compression: Compression) {
         self.compression = compression;
     }
 
@@ -100,8 +111,8 @@ impl<W: Write + Seek> TiffEncoder<W> {
         self.sample_format = sample_format;
     }
 
-    pub fn set_bits_per_sample(&mut self, bits_per_sample: u16) {
-        self.bits_per_sample = bits_per_sample as u8;
+    pub fn set_bits_per_sample(&mut self, bits_per_sample: u8) {
+        self.bits_per_sample = bits_per_sample;
     }
 
     pub fn set_extra_samples(&mut self, extra_samples: u16) {
@@ -163,13 +174,13 @@ impl<W: Write + Seek> TiffEncoder<W> {
         width: u32,
         height: u32,
         photometric_interpretation: PhotometricInterpretation,
-    ) -> TiffResult<ImageEncoder<W>> {
+    ) -> TiffResult<SubfileEncoder<W>> {
         if width == 0 || height == 0 {
             return Err(TiffError::FormatError(TiffFormatError::InvalidDimensions(
                 width, height,
             )));
         }
-        if self.compression == CompressionMethod::PackBits
+        if self.compression == Compression::PackBits
             && self.rows_per_strip.map(|r| r > 1).unwrap_or(false)
         {
             return Err(TiffError::UnsupportedError(
@@ -200,14 +211,21 @@ impl<W: Write + Seek> TiffEncoder<W> {
         // Also keep the multiple strip handling 'oiled'
         let rows_per_strip = self.rows_per_strip.unwrap_or({
             match self.compression {
-                CompressionMethod::PackBits => 1, // Each row must be packed separately. Do not compress across row boundaries
+                Compression::PackBits => 1, // Each row must be packed separately. Do not compress across row boundaries
                 _ => 1_000_000u64.div_ceil(row_bytes) as u32,
             }
         });
 
         self.set_tag(Tag::ImageWidth, width);
         self.set_tag(Tag::ImageLength, height);
-        self.set_tag(Tag::Compression, self.compression.to_u16());
+
+        let compression = match self.compression {
+            Compression::None => CompressionMethod::None,
+            Compression::PackBits => CompressionMethod::PackBits,
+            Compression::Lzw => CompressionMethod::LZW,
+            Compression::Deflate(_) => CompressionMethod::Deflate,
+        };
+        self.set_tag(Tag::Compression, compression.to_u16());
 
         self.set_tag(
             Tag::PhotometricInterpretation,
@@ -239,7 +257,7 @@ impl<W: Write + Seek> TiffEncoder<W> {
         self.ifd.remove(&Tag::TileByteCounts.to_u16());
         self.ifd.remove(&Tag::TileOffsets.to_u16());
 
-        Ok(ImageEncoder {
+        Ok(SubfileEncoder {
             inner: self,
             bytes_per_chunk: row_bytes as usize,
             num_chunks: height.div_ceil(rows_per_strip as u32),
@@ -248,15 +266,15 @@ impl<W: Write + Seek> TiffEncoder<W> {
 }
 
 /// Type to encode images strip by strip.
-pub struct ImageEncoder<'a, W: Write + Seek> {
+pub struct SubfileEncoder<'a, W: Write + Seek> {
     inner: &'a mut TiffEncoder<W>,
     bytes_per_chunk: usize,
     num_chunks: u32,
 }
 
-impl<'a, W: Write + Seek> ImageEncoder<'a, W> {
+impl<'a, W: Write + Seek> SubfileEncoder<'a, W> {
     pub fn write(self, data: &[u8]) -> TiffResult<()> {
-        if self.inner.compression == CompressionMethod::None {
+        if self.inner.compression == Compression::None {
             let encoded: Vec<_> = data.chunks(self.bytes_per_chunk).collect();
             return self.write_encoded(&encoded);
         }
@@ -273,20 +291,15 @@ impl<'a, W: Write + Seek> ImageEncoder<'a, W> {
     fn compress(&self, data: &[u8]) -> TiffResult<Vec<u8>> {
         let mut compressed = Vec::new();
         match self.inner.compression {
-            CompressionMethod::None => return Ok(data.to_vec()),
-            CompressionMethod::PackBits => {
+            Compression::None => return Ok(data.to_vec()),
+            Compression::PackBits => {
                 Packbits.write_to(&mut compressed, data)?;
             }
-            CompressionMethod::LZW => {
+            Compression::Lzw => {
                 Lzw.write_to(&mut compressed, data)?;
             }
-            CompressionMethod::Deflate => {
-                Deflate::default().write_to(&mut compressed, data)?;
-            }
-            c => {
-                return Err(TiffError::UnsupportedError(
-                    TiffUnsupportedError::UnsupportedCompressionMethod(c),
-                ))
+            Compression::Deflate(level) => {
+                Deflate::with_level(level).write_to(&mut compressed, data)?;
             }
         }
         Ok(compressed)
