@@ -1,5 +1,3 @@
-
-
 use std::{
     collections::BTreeMap,
     io::{Seek, SeekFrom, Write},
@@ -259,7 +257,7 @@ impl<W: Write + Seek> TiffEncoder<W> {
 
         Ok(SubfileEncoder {
             inner: self,
-            bytes_per_chunk: row_bytes as usize,
+            bytes_per_chunk: row_bytes as usize * rows_per_strip as usize,
             num_chunks: height.div_ceil(rows_per_strip as u32),
         })
     }
@@ -338,7 +336,11 @@ impl<'a, W: Write + Seek> SubfileEncoder<'a, W> {
         }
 
         // Compute the sizes of different elements.
-        let ifd_size = 2 + (ifd.len() as u64) * (2 + data_bytes);
+        let ifd_size = if big_tiff {
+            16 + 20 * (2 + ifd.len() as u64)
+        } else {
+            6 + 12 * (2 + ifd.len() as u64)
+        };
         let ifd_data_start = writer.stream_position()? + ifd_size;
 
         let chunk_ranges_size = if chunks.len() > 1 {
@@ -351,6 +353,7 @@ impl<'a, W: Write + Seek> SubfileEncoder<'a, W> {
                 .values()
                 .map(|e| e.data.len() as u64)
                 .filter(|&len| len > data_bytes)
+                .map(|len| len.next_multiple_of(data_bytes))
                 .sum::<u64>();
         let pixel_data_start = ifd_data_start + ifd_data_size;
 
@@ -366,7 +369,7 @@ impl<'a, W: Write + Seek> SubfileEncoder<'a, W> {
                 chunk_sizes.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
                 chunk_offsets.extend_from_slice(&(offset as u32).to_le_bytes());
             }
-            offset += chunk.len() as u64;
+            offset += (chunk.len() as u64).next_multiple_of(data_bytes);
         }
         ifd.insert(
             Tag::StripByteCounts.to_u16(),
@@ -401,7 +404,11 @@ impl<'a, W: Write + Seek> SubfileEncoder<'a, W> {
         }
 
         // Write the IFD.
-        writer.write_all(&(ifd.len() as u16).to_le_bytes())?;
+        if big_tiff {
+            writer.write_all(&(ifd.len() as u64).to_le_bytes())?;
+        } else {
+            writer.write_all(&(ifd.len() as u16).to_le_bytes())?;
+        }
         for ((tag, entry), offset) in ifd.iter().zip(entry_offsets) {
             writer.write_all(&tag.to_le_bytes())?;
             writer.write_all(&entry.data_type.to_le_bytes())?;
